@@ -318,26 +318,14 @@ bool operator<(big_integer const& a, big_integer const& b) {
     if (a.sign_ != b.sign_) {
         return a.sign_ < b.sign_;
     }
-    if (a.sign_ == 1) {
-        return compare(a.words_, b.words_) == -1;
-    } else if (a.sign_ == -1) {
-        return compare(a.words_, b.words_) == 1;
-    } else {
-        return false;
-    }
+    return compare(a.words_, b.words_) == -1;
 }
 
 bool operator>(big_integer const& a, big_integer const& b) {
     if (a.sign_ != b.sign_) {
         return a.sign_ > b.sign_;
     }
-    if (a.sign_ == -1) {
-        return compare(a.words_, b.words_) == -1;
-    } else if (a.sign_ == 1) {
-        return compare(a.words_, b.words_) == 1;
-    } else {
-        return false;
-    }
+    return compare(a.words_, b.words_) == 1;
 }
 
 bool operator<=(big_integer const& a, big_integer const& b) {
