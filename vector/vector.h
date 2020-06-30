@@ -59,7 +59,7 @@ struct vector
     iterator erase(const_iterator first, const_iterator last); // O(N) weak
 
 private:
-    size_t increase_capacity() const;
+    size_t increased_capacity() const;
     void new_buffer(size_t new_capacity);
 
     template<bool Condition, typename S = void>
@@ -108,13 +108,12 @@ vector<T>::vector(vector<T> const& other)
     , capacity_(0)
 {
     if (other.size_ != 0) {
-        data_ = static_cast<T*>(operator new(other.size_ * sizeof(T)));
-        try {
-            copy_construct_all(data_, other.data_, other.size_);
-        } catch (...) {
-            operator delete(data_);
-            throw;
-        }
+        auto deleter = [](T* ptr) {
+            operator delete(ptr);
+        };
+        std::unique_ptr<T, decltype(deleter)> p(static_cast<T*>(operator new(other.size_ * sizeof(T))), deleter);
+        copy_construct_all(p.get(), other.data_, other.size_);
+        data_ = p.release();
         size_ = other.size_;
         capacity_ = other.size_;
     }
@@ -203,8 +202,7 @@ void vector<T>::push_back(T const& element)
 {
     if (size_ == capacity_) {
         vector<T> tmp;
-        tmp.capacity_ = increase_capacity();
-        tmp.data_ = static_cast<T*>(operator new(tmp.capacity_ * sizeof(T)));
+        tmp.reserve(increased_capacity());
 
         copy_construct_all(tmp.data_, data_, size_);
 
@@ -298,23 +296,14 @@ typename vector<T>::iterator vector<T>::insert(const_iterator pos, T const& elem
 {
     assert(begin() <= pos && pos <= end());
 
-    auto p = const_cast<iterator>(pos);
-    vector<T> tmp;
-    tmp.new_buffer(size_ == capacity_ ? increase_capacity() : capacity_);
-
-    copy_construct_all(tmp.data_, data_, p - begin());
-    tmp.size_ = p - begin();
-
-    iterator r = tmp.end();
-    tmp.push_back(element);
-
-    copy_construct_all(tmp.end(), p, end() - p);
-    tmp.size_ += end() - p;
-
-    assert(tmp.size_ == size_ + 1);
-
-    swap(tmp);
-    return r;
+    ptrdiff_t dist = end() - pos;
+    push_back(element);
+    iterator it = end() - 1;
+    while (dist-- != 0) {
+        std::swap(*(it - 1), *it);
+        --it;
+    }
+    return it;
 }
 
 template <typename T>
@@ -326,12 +315,12 @@ typename vector<T>::iterator vector<T>::erase(const_iterator pos)
 template <typename T>
 typename vector<T>::iterator vector<T>::erase(const_iterator first, const_iterator last)
 {
-    assert(begin() <= first && last <= end());
-    auto p = const_cast<iterator>(first);
-    iterator p1 = p;
+    assert(begin() <= first && first <= last && last <= end());
+
+    auto p1 = const_cast<iterator>(first);
     auto p2 = const_cast<iterator>(last);
-    iterator e = end();
-    while (p2 != e) {
+    iterator p = p1;
+    while (p2 != end()) {
         std::swap(*p1, *p2);
         ++p1, ++p2;
     }
@@ -341,7 +330,7 @@ typename vector<T>::iterator vector<T>::erase(const_iterator first, const_iterat
 }
 
 template <typename T>
-size_t vector<T>::increase_capacity() const
+size_t vector<T>::increased_capacity() const
 {
     return 2 * capacity_ + (capacity_ == 0);
 }
@@ -383,10 +372,8 @@ template<typename T_>
 typename std::enable_if<std::is_nothrow_copy_constructible<T_>::value>::type
 vector<T>::copy_construct_all(T *dest, const T *src, size_t size)
 {
-    size_t i = 0;
-    while (i != size) {
+    for (size_t i = 0; i != size; ++i) {
         new (dest + i) T(src[i]);
-        ++i;
     }
 }
 
