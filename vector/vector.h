@@ -384,9 +384,8 @@ vector<T>::copy_construct_all(T *dest, const T *src, size_t size)
 {
     size_t i = 0;
     try {
-        while (i != size) {
+        for (; i != size; ++i) {
             new(dest + i) T(src[i]);
-            ++i;
         }
     } catch(...) {
         destroy_all(dest, i);
