@@ -62,53 +62,37 @@ private:
     size_t increase_capacity() const;
     void new_buffer(size_t new_capacity);
 
+    template<bool Condition, typename S = void>
+    using enable_if_t = typename std::enable_if<Condition, S>::type;
+
+//    C++14 only =(
+//    template<typename S>
+//    static constexpr bool is_trivially_destructible_v = std::is_trivially_destructible<S>::value;
+
+//    template<typename S>
+//    static constexpr bool is_nothrow_copy_constructible_v = std::is_nothrow_copy_constructible<S>::value;
+
+    template<typename T_ = T>
+    static enable_if_t<std::is_trivially_destructible<T_>::value>
+    destroy_all(T* dest, size_t size);
+
+    template<typename T_ = T>
+    static enable_if_t<!std::is_trivially_destructible<T_>::value>
+    destroy_all(T* dest, size_t size);
+
+    template<typename T_ = T>
+    static enable_if_t<std::is_nothrow_copy_constructible<T_>::value>
+    copy_construct_all(T* dest, T const* src, size_t size);
+
+    template<typename T_ = T>
+    static enable_if_t<!std::is_nothrow_copy_constructible<T_>::value>
+    copy_construct_all(T* dest, T const* src, size_t size);
+
 private:
     T* data_;
     size_t size_;
     size_t capacity_;
 };
-
-namespace {
-    template <typename T>
-    typename std::enable_if<std::is_trivially_destructible<T>::value>::type
-    destroy_all(T* dest, size_t size) {}
-
-    template <typename T>
-    typename std::enable_if<!std::is_trivially_destructible<T>::value>::type
-    destroy_all(T* dest, size_t size)
-    {
-        while (size != 0) {
-            dest[--size].~T();
-        }
-    }
-
-    template <typename T>
-    typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type
-    copy_construct_all(T* dest, T const* src, size_t size)
-    {
-        size_t i = 0;
-        while (i != size) {
-            new (dest + i) T(src[i]);
-            ++i;
-        }
-    }
-
-    template <typename T>
-    typename std::enable_if<!std::is_nothrow_copy_constructible<T>::value>::type
-    copy_construct_all(T* dest, T const* src, size_t size)
-    {
-        size_t i = 0;
-        try {
-            while (i != size) {
-                new (dest + i) T(src[i]);
-                ++i;
-            }
-        } catch (...) {
-            destroy_all(dest, i);
-            throw;
-        }
-    }
-}
 
 template <typename T>
 vector<T>::vector()
@@ -221,9 +205,12 @@ void vector<T>::push_back(T const& element)
         vector<T> tmp;
         tmp.capacity_ = increase_capacity();
         tmp.data_ = static_cast<T*>(operator new(tmp.capacity_ * sizeof(T)));
+
         copy_construct_all(tmp.data_, data_, size_);
+
         tmp.size_ = size_;
         tmp.push_back(element);
+
         swap(tmp);
     } else {
         new (data_ + size_) T(element);
@@ -310,16 +297,22 @@ template <typename T>
 typename vector<T>::iterator vector<T>::insert(const_iterator pos, T const& element)
 {
     assert(begin() <= pos && pos <= end());
+
     auto p = const_cast<iterator>(pos);
     vector<T> tmp;
     tmp.new_buffer(size_ == capacity_ ? increase_capacity() : capacity_);
+
     copy_construct_all(tmp.data_, data_, p - begin());
     tmp.size_ = p - begin();
+
     iterator r = tmp.end();
     tmp.push_back(element);
+
     copy_construct_all(tmp.end(), p, end() - p);
     tmp.size_ += end() - p;
+
     assert(tmp.size_ == size_ + 1);
+
     swap(tmp);
     return r;
 }
@@ -367,4 +360,49 @@ void vector<T>::new_buffer(size_t new_capacity)
     }
 
     swap(tmp);
+}
+
+template<typename T>
+template<typename T_>
+typename std::enable_if<std::is_trivially_destructible<T_>::value>::type
+vector<T>::destroy_all(T* dest, size_t size)
+{}
+
+template<typename T>
+template<typename T_>
+typename std::enable_if<!std::is_trivially_destructible<T_>::value>::type
+vector<T>::destroy_all(T* dest, size_t size)
+{
+    while (size != 0) {
+        dest[--size].~T();
+    }
+}
+
+template<typename T>
+template<typename T_>
+typename std::enable_if<std::is_nothrow_copy_constructible<T_>::value>::type
+vector<T>::copy_construct_all(T *dest, const T *src, size_t size)
+{
+    size_t i = 0;
+    while (i != size) {
+        new (dest + i) T(src[i]);
+        ++i;
+    }
+}
+
+template<typename T>
+template<typename T_>
+typename std::enable_if<!std::is_nothrow_copy_constructible<T_>::value>::type
+vector<T>::copy_construct_all(T *dest, const T *src, size_t size)
+{
+    size_t i = 0;
+    try {
+        while (i != size) {
+            new(dest + i) T(src[i]);
+            ++i;
+        }
+    } catch(...) {
+        destroy_all(dest, i);
+        throw;
+    }
 }
