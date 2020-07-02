@@ -9,15 +9,15 @@ namespace {
 
     uint64_t const base = static_cast<uint64_t>(UINT32_MAX) + 1;
 
-    int compare(storage_t const &a, storage_t const &b) {
+    int8_t compare(storage_t const &a, storage_t const &b) {
         size_t n = a.size();
         size_t m = b.size();
         if (n != m) {
-            return (n > m) - (n < m);
+            return 1 - ((n < m) << 1U);
         }
-        for (size_t i = 1; i <= n; ++i) {
-            if (a[n - i] != b[n - i]) {
-                return (a[n - i] > b[n - i]) - (a[n - i] < b[n - i]);
+        for (size_t i = n; i-->0;) {
+            if (a[i] != b[i]) {
+                return 1 - ((a[i] < b[i]) << 1U);
             }
         }
         return 0;
@@ -42,8 +42,7 @@ namespace {
     // return a % x
     uint32_t divide(storage_t &a, uint32_t x) {
         uint64_t carry = 0;
-        for (size_t i = a.size(); i != 0;) {
-            --i;
+        for (size_t i = a.size(); i-->0;) {
             carry = ((carry << 32U) | a[i]);
             a[i] = carry / x;
             carry = carry - a[i] * x;
@@ -138,7 +137,7 @@ big_integer& big_integer::operator*=(const big_integer &rhs) {
     big_integer const &b(rhs.sign_ == -1 ? -rhs : rhs);
     big_integer product;
     product.sign_ = 1;
-    int result_sign = sign_ * rhs.sign_;
+    int8_t result_sign = sign_ * rhs.sign_;
     product.resize_(a.words_.size() + b.words_.size() + 1);
     for (size_t i = 0; i < a.words_.size(); ++i) {
         uint64_t carry = 0;
@@ -158,7 +157,7 @@ big_integer& big_integer::operator*=(const big_integer &rhs) {
 }
 
 big_integer& big_integer::operator/=(const big_integer &rhs) {
-    int result_sign = sign_ / rhs.sign_;
+    int8_t result_sign = sign_ / rhs.sign_;
     if (sign_ == -1) *this = -*this;
     storage_t d = (rhs.sign_ == -1 ? -rhs : rhs).words_;
     if (compare(words_, d) == -1) {

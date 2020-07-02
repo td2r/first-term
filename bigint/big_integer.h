@@ -57,7 +57,7 @@ private:
     void resize_(size_t n);
 
 private:
-    int sign_;
+    int8_t sign_;
     storage_t words_;
 };
 
