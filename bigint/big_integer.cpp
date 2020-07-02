@@ -9,23 +9,9 @@ namespace {
 
     uint64_t const base = static_cast<uint64_t>(UINT32_MAX) + 1;
 
-    int8_t compare(storage_t const &a, storage_t const &b) {
-        size_t n = a.size();
-        size_t m = b.size();
-        if (n != m) {
-            return 1 - ((n < m) << 1U);
-        }
-        for (size_t i = n; i-->0;) {
-            if (a[i] != b[i]) {
-                return 1 - ((a[i] < b[i]) << 1U);
-            }
-        }
-        return 0;
-    }
-
     // r = a * b
     // r == a also works
-    void multiply(storage_t const &a, uint32_t b, storage_t &r, uint64_t carry = 0) {
+    void multiply(storage_t const& a, uint32_t b, storage_t& r, uint64_t carry = 0) {
         auto b64 = static_cast<uint64_t>(b);
         r.resize(a.size());
         for (size_t i = 0; i < a.size(); ++i) {
@@ -40,7 +26,7 @@ namespace {
 
     // a /= x
     // return a % x
-    uint32_t divide(storage_t &a, uint32_t x) {
+    uint32_t divide(storage_t& a, uint32_t x) {
         uint64_t carry = 0;
         for (size_t i = a.size(); i-->0;) {
             carry = ((carry << 32U) | a[i]);
@@ -54,16 +40,22 @@ namespace {
         return std::min(static_cast<uint32_t>(((((r1 << 32U) | r2) << 32U) | r3) / d2), UINT32_MAX);
     }
 
-    bool smaller(storage_t const &r, storage_t const &dq, size_t k, size_t m) {
-        for (size_t i = 0; i <= m; ++i) {
-            if (r[m + k - i] != dq[m - i]) {
-                return r[m + k - i] < dq[m - i];
+    bool smaller(storage_t const& r, storage_t const& dq, size_t k, size_t m) {
+        for (size_t i = m + 1; i-->0;) {
+            if (r[i + k] != dq[i]) {
+                return r[i + k] < dq[i];
             }
         }
         return false;
     }
 
-    void difference(storage_t &r, storage_t const &dq, size_t k, size_t m) {
+    bool less(storage_t const& a, storage_t const& b) {
+        size_t n = a.size();
+        size_t m = b.size();
+        return n == m ? smaller(a, b, 0, n - 1) : n < m;
+    }
+
+    void difference(storage_t& r, storage_t const& dq, size_t k, size_t m) {
         uint64_t borrow = 0;
         for (size_t i = 0; i <= m; ++i) {
             uint64_t diff = r[k + i] - (dq[i] + borrow);
@@ -115,7 +107,7 @@ big_integer& big_integer::operator=(big_integer const& other) {
     return *this;
 }
 
-big_integer& big_integer::operator+=(const big_integer &rhs) {
+big_integer& big_integer::operator+=(const big_integer& rhs) {
     uint64_t carry = 0;
     resize_(std::max(words_.size(), rhs.words_.size()) + 1);
     for (size_t i = 0; i < words_.size(); ++i) {
@@ -128,13 +120,13 @@ big_integer& big_integer::operator+=(const big_integer &rhs) {
     return *this;
 }
 
-big_integer& big_integer::operator-=(const big_integer &rhs) {
+big_integer& big_integer::operator-=(const big_integer& rhs) {
     return *this += -rhs;
 }
 
-big_integer& big_integer::operator*=(const big_integer &rhs) {
-    big_integer const &a(sign_ == -1 ? -*this : *this);
-    big_integer const &b(rhs.sign_ == -1 ? -rhs : rhs);
+big_integer& big_integer::operator*=(const big_integer& rhs) {
+    big_integer const& a(sign_ == -1 ? -*this : *this);
+    big_integer const& b(rhs.sign_ == -1 ? -rhs : rhs);
     big_integer product;
     product.sign_ = 1;
     int8_t result_sign = sign_ * rhs.sign_;
@@ -156,11 +148,11 @@ big_integer& big_integer::operator*=(const big_integer &rhs) {
     return *this;
 }
 
-big_integer& big_integer::operator/=(const big_integer &rhs) {
+big_integer& big_integer::operator/=(const big_integer& rhs) {
     int8_t result_sign = sign_ / rhs.sign_;
     if (sign_ == -1) *this = -*this;
     storage_t d = (rhs.sign_ == -1 ? -rhs : rhs).words_;
-    if (compare(words_, d) == -1) {
+    if (less(words_, d)) {
         return *this = 0;
     } else if (d.size() == 1) {
         sign_ = 1;
@@ -200,22 +192,22 @@ big_integer& big_integer::operator/=(const big_integer &rhs) {
     return *this;
 }
 
-big_integer& big_integer::operator%=(const big_integer &rhs) {
+big_integer& big_integer::operator%=(const big_integer& rhs) {
     *this -= (*this / rhs) * rhs;
     return *this;
 }
 
-big_integer& big_integer::operator&=(const big_integer &rhs) {
+big_integer& big_integer::operator&=(const big_integer& rhs) {
     apply_bitwise_(bit_and, rhs);
     return *this;
 }
 
-big_integer& big_integer::operator|=(const big_integer &rhs) {
+big_integer& big_integer::operator|=(const big_integer& rhs) {
     apply_bitwise_(bit_or, rhs);
     return *this;
 }
 
-big_integer& big_integer::operator^=(const big_integer &rhs) {
+big_integer& big_integer::operator^=(const big_integer& rhs) {
     apply_bitwise_(bit_xor, rhs);
     return *this;
 }
@@ -317,14 +309,14 @@ bool operator<(big_integer const& a, big_integer const& b) {
     if (a.sign_ != b.sign_) {
         return a.sign_ < b.sign_;
     }
-    return compare(a.words_, b.words_) == -1;
+    return less(a.words_, b.words_);
 }
 
 bool operator>(big_integer const& a, big_integer const& b) {
     if (a.sign_ != b.sign_) {
         return a.sign_ > b.sign_;
     }
-    return compare(a.words_, b.words_) == 1;
+    return less(b.words_, a.words_);
 }
 
 bool operator<=(big_integer const& a, big_integer const& b) {
@@ -368,7 +360,7 @@ void big_integer::shrink_words_() {
     }
 }
 
-void big_integer::swap_(big_integer &rhs) {
+void big_integer::swap_(big_integer& rhs) {
     std::swap(sign_, rhs.sign_);
     words_.swap(rhs.words_);
 }
@@ -377,7 +369,7 @@ void big_integer::resize_(size_t n) {
     words_.resize(n, (sign_ == -1) * UINT32_MAX);
 }
 
-void big_integer::apply_bitwise_(const std::function<uint32_t (uint32_t, uint32_t)>& f, big_integer const &rhs) {
+void big_integer::apply_bitwise_(const std::function<uint32_t (uint32_t, uint32_t)>& f, big_integer const& rhs) {
     resize_(std::max(words_.size(), rhs.words_.size()) + 1);
     for (size_t i = 0; i < words_.size(); ++i) {
         words_[i] = f(words_[i], rhs.s_digit_(i));
