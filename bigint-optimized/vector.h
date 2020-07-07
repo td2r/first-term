@@ -6,17 +6,13 @@
 
 struct vector
 {
-    typedef uint32_t* iterator;
-    typedef uint32_t const* const_iterator;
+    using iterator = uint32_t*;
+    using const_iterator = uint32_t const*;
 
-    struct shared_array {
+    struct shared_buffer {
+        size_t capacity;
         size_t ref_counter;
         uint32_t words[];
-    };
-
-    struct buffer_data {
-        size_t capacity;
-        shared_array* arr;
     };
 
     vector();
@@ -41,6 +37,8 @@ struct vector
 
     bool empty() const;
 
+    size_t capacity() const;
+
     void clear();
 
     void swap(vector& other);
@@ -60,14 +58,16 @@ private:
     size_t increased_capacity_() const;
     void realloc_data_(size_t new_capacity);
     void realloc_if_share_();
+    void realloc_if_share_or_(bool cond, size_t new_capacity);
 
 private:
-    static const size_t SMALL_SIZE = sizeof(buffer_data) / sizeof(uint32_t);
+    static constexpr size_t SMALL_SIZE = sizeof(shared_buffer*) / sizeof(uint32_t);
 
 private:
+    bool small_;
     size_t size_;
     union {
-        buffer_data dynamic_;
+        shared_buffer* dynamic_;
         uint32_t static_[SMALL_SIZE];
     } buffers_;
 };
