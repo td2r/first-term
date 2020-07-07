@@ -5,44 +5,48 @@
 #include <algorithm>
 #include <cassert>
 
-static vector::buffer_data alloc_data(size_t capacity)
+static vector::shared_buffer* alloc_data(size_t capacity)
 {
-    using shared_array = vector::shared_array;
-    vector::buffer_data data{};
-    data.arr = static_cast<shared_array*>(
-            operator new(sizeof(shared_array) + capacity * sizeof(uint32_t)));
-    data.arr->ref_counter = 1;
-    data.capacity = capacity;
-    return data;
+    using shared_buffer = vector::shared_buffer;
+    shared_buffer* buffer;
+    buffer = static_cast<shared_buffer*>(
+            operator new(sizeof(shared_buffer) + capacity * sizeof(uint32_t)));
+    buffer->ref_counter = 1;
+    buffer->capacity = capacity;
+    return buffer;
 }
 
-static void unshare(vector::shared_array* a) {
-    if (!--a->ref_counter) {
+static void unshare(vector::shared_buffer* a) {
+    if (--a->ref_counter == 0) {
         operator delete(a);
     }
 }
 
 vector::vector()
-    : size_(0)
+    : small_(true)
+    , size_(0)
 {}
 
 vector::vector(size_t size)
-    : size_(size)
+    : small_(size <= SMALL_SIZE)
+    , size_(size)
 {
-    if (size <= SMALL_SIZE) {
+    if (small_) {
         // use std::fill instead of memset to activate field static_
         std::fill(buffers_.static_, buffers_.static_ + size, 0);
     } else {
         buffers_.dynamic_ = alloc_data(size);
+        memset(buffers_.dynamic_->words, 0, size * sizeof(uint32_t));
     }
 }
 
 vector::vector(vector const& other)
-    : size_(other.size_)
+    : small_(other.small_)
+    , size_(other.size_)
     , buffers_(other.buffers_)
 {
-    if (size_ > SMALL_SIZE) {
-        ++buffers_.dynamic_.arr->ref_counter;
+    if (!small_) {
+        ++buffers_.dynamic_->ref_counter;
     }
 }
 
@@ -57,9 +61,10 @@ vector& vector::operator=(vector const& other)
 
 vector::~vector()
 {
-    if (size_ > SMALL_SIZE) {
-        unshare(buffers_.dynamic_.arr);
+    if (!small_) {
+        unshare(buffers_.dynamic_);
     }
+    small_ = false;
     size_ = 0;
 }
 
@@ -77,11 +82,11 @@ uint32_t const& vector::operator[](size_t i) const
 
 uint32_t *vector::data() {
     realloc_if_share_();
-    return size_ <= SMALL_SIZE ? buffers_.static_ : buffers_.dynamic_.arr->words;
+    return small_ ? buffers_.static_ : buffers_.dynamic_->words;
 }
 
 uint32_t const *vector::data() const {
-    return size_ <= SMALL_SIZE ? buffers_.static_ : buffers_.dynamic_.arr->words;
+    return small_ ? buffers_.static_ : buffers_.dynamic_->words;
 }
 
 size_t vector::size() const
@@ -92,31 +97,11 @@ size_t vector::size() const
 void vector::resize(size_t new_size, uint32_t element)
 {
     if (new_size < size_) {
-        if (size_ <= SMALL_SIZE) {
-            std::fill(buffers_.static_ + new_size, buffers_.static_ + size_, 0);
-        } else if (new_size <= SMALL_SIZE) {
-            shared_array* arr = buffers_.dynamic_.arr;
-            // use of std::copy instead of memcpy to activate field static_
-            std::copy(arr->words, arr->words + new_size, buffers_.static_);
-            unshare(arr);
-        } else {
-            realloc_if_share_();
-            memset(buffers_.dynamic_.arr->words + new_size, 0, (size_ - new_size) * sizeof(uint32_t));
-        }
+        memset(data() + new_size, 0, (size_ - new_size) * sizeof(uint32_t)); // data() calls realloc_if_share_()
     } else if (new_size > size_) {
-        if (size_ > SMALL_SIZE) {
-            if (buffers_.dynamic_.arr->ref_counter > 1 || new_size > buffers_.dynamic_.capacity) {
-                realloc_data_(new_size > buffers_.dynamic_.capacity ? new_size : buffers_.dynamic_.capacity);
-            }
-            std::fill(buffers_.dynamic_.arr->words + size_, buffers_.dynamic_.arr->words + new_size, element);
-        } else if (new_size > SMALL_SIZE) {
-            buffer_data data = alloc_data(new_size);
-            memcpy(data.arr->words, buffers_.static_, size_ * sizeof(uint32_t));
-            std::fill(data.arr->words + size_, data.arr->words + new_size, element);
-            buffers_.dynamic_ = data;
-        } else {
-            std::fill(buffers_.static_ + size_, buffers_.static_ + new_size, element);
-        }
+        realloc_if_share_or_(new_size > capacity(), new_size);
+        uint32_t* words = data();
+        std::fill(words + size_, words + new_size, element);
     }
     size_ = new_size;
 }
@@ -134,38 +119,14 @@ uint32_t const& vector::back() const
 
 void vector::push_back(uint32_t const& element)
 {
-    if (size_ < SMALL_SIZE) {
-        buffers_.static_[size_++] = element;
-    } else if (size_ == SMALL_SIZE) {
-        buffer_data data = alloc_data(SMALL_SIZE + 1);
-        memcpy(data.arr->words, buffers_.static_, SMALL_SIZE * sizeof(uint32_t));
-        data.arr->words[SMALL_SIZE] = element;
-        buffers_.dynamic_ = data;
-        ++size_;
-    } else {
-        if (buffers_.dynamic_.arr->ref_counter > 1 || size_ == buffers_.dynamic_.capacity) {
-            realloc_data_(size_ == buffers_.dynamic_.capacity ?
-                    increased_capacity_() : buffers_.dynamic_.capacity);
-        }
-        buffers_.dynamic_.arr->words[size_++] = element;
-    }
+    realloc_if_share_or_(size_ == capacity(), increased_capacity_());
+    data()[size_++] = element;
 }
 
 void vector::pop_back()
 {
     assert(size_ != 0);
-
-    if (size_ <= SMALL_SIZE) {
-        --size_;
-    } else if (size_ == SMALL_SIZE + 1) {
-        shared_array* arr = buffers_.dynamic_.arr;
-        std::copy(arr->words, arr->words + SMALL_SIZE, buffers_.static_);
-        unshare(arr);
-        --size_;
-    } else {
-        realloc_if_share_();
-        buffers_.dynamic_.arr->words[--size_] = 0;
-    }
+    data()[--size_] = 0;
 }
 
 bool vector::empty() const
@@ -173,17 +134,20 @@ bool vector::empty() const
     return size_ == 0;
 }
 
+size_t vector::capacity() const {
+    return small_ ? SMALL_SIZE : buffers_.dynamic_->capacity;
+}
+
 void vector::clear()
 {
-    if (size_ > SMALL_SIZE) {
-        unshare(buffers_.dynamic_.arr);
-    }
+    memset(data(), 0, size_ * sizeof(uint32_t));
     size_ = 0;
 }
 
 void vector::swap(vector& other)
 {
     using std::swap;
+    swap(small_, other.small_);
     swap(buffers_, other.buffers_);
     swap(size_, other.size_);
 }
@@ -215,9 +179,7 @@ vector::iterator vector::erase(const_iterator pos)
 
 vector::iterator vector::erase(const_iterator first, const_iterator last)
 {
-    if (size_ > SMALL_SIZE) {
-        realloc_if_share_();
-    }
+    realloc_if_share_();
     auto p1 = const_cast<iterator>(first);
     auto p2 = const_cast<iterator>(last);
     iterator p = p1;
@@ -237,22 +199,27 @@ bool operator==(vector const& a, vector const& b)
 
 size_t vector::increased_capacity_() const
 {
-    assert(size_ > SMALL_SIZE);
-    return 2 * buffers_.dynamic_.capacity + (buffers_.dynamic_.capacity == 0);
+    return 2 * capacity();
 }
 
 void vector::realloc_data_(size_t new_capacity) {
-    assert(size_ > SMALL_SIZE);
-    assert(new_capacity > SMALL_SIZE);
-
-    buffer_data new_data = alloc_data(new_capacity);
-    memcpy(new_data.arr->words, buffers_.dynamic_.arr->words, size_ * sizeof(uint32_t));
-    unshare(buffers_.dynamic_.arr);
-    buffers_.dynamic_ = new_data;
+    shared_buffer* new_buffer = alloc_data(new_capacity);
+    uint32_t const* words = const_cast<vector const*>(this)->data();
+    std::copy(words, words + size_, new_buffer->words);
+    if (small_) {
+        small_ = false;
+    } else {
+        unshare(buffers_.dynamic_);
+    }
+    buffers_.dynamic_ = new_buffer;
 }
 
 void vector::realloc_if_share_() {
-    if (size_ > SMALL_SIZE && buffers_.dynamic_.arr->ref_counter > 1) {
-        realloc_data_(buffers_.dynamic_.capacity);
+    realloc_if_share_or_(false, 0);
+}
+
+void vector::realloc_if_share_or_(bool cond, size_t new_capacity) {
+    if ((!small_ && buffers_.dynamic_->ref_counter > 1) || cond) {
+        realloc_data_(cond ? new_capacity : buffers_.dynamic_->capacity);
     }
 }
