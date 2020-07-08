@@ -1,5 +1,4 @@
 #include "vector.h"
-#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
@@ -31,13 +30,8 @@ vector::vector(size_t size)
     : small_(size <= SMALL_SIZE)
     , size_(size)
 {
-    if (small_) {
-        // use std::fill instead of memset to activate field static_
-        std::fill(buffers_.static_, buffers_.static_ + size, 0);
-    } else {
-        buffers_.dynamic_ = alloc_data(size);
-        memset(buffers_.dynamic_->words, 0, size * sizeof(uint32_t));
-    }
+    uint32_t* words = small_ ? buffers_.static_ : (buffers_.dynamic_ = alloc_data(size))->words;
+    std::fill(words, words + size, 0);
 }
 
 vector::vector(vector const& other)
@@ -96,11 +90,11 @@ size_t vector::size() const
 
 void vector::resize(size_t new_size, uint32_t element)
 {
+    realloc_if_share_or_(new_size > capacity(), new_size);
+    uint32_t* words = data();
     if (new_size < size_) {
-        memset(data() + new_size, 0, (size_ - new_size) * sizeof(uint32_t)); // data() calls realloc_if_share_()
+        std::fill(words + new_size, words + size_, 0);
     } else if (new_size > size_) {
-        realloc_if_share_or_(new_size > capacity(), new_size);
-        uint32_t* words = data();
         std::fill(words + size_, words + new_size, element);
     }
     size_ = new_size;
@@ -140,7 +134,8 @@ size_t vector::capacity() const {
 
 void vector::clear()
 {
-    memset(data(), 0, size_ * sizeof(uint32_t));
+    uint32_t* words = data();
+    std::fill(words, words + size_, 0);
     size_ = 0;
 }
 
@@ -187,14 +182,14 @@ vector::iterator vector::erase(const_iterator first, const_iterator last)
     while (p2 != e) {
         std::swap(*p1++, *p2++);
     }
-    memset(p1, 0, (p2 - p1) * sizeof(uint32_t));
+    std::fill(p1, p2, 0);
     size_ -= last - first;
     return p;
 }
 
 bool operator==(vector const& a, vector const& b)
 {
-    return a.size_ == b.size_ && memcmp(a.data(), b.data(), a.size_ * sizeof(uint32_t)) == 0;
+    return a.size_ == b.size_ && std::memcmp(a.data(), b.data(), a.size_ * sizeof(uint32_t)) == 0;
 }
 
 size_t vector::increased_capacity_() const
